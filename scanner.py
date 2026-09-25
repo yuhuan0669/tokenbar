@@ -16,39 +16,176 @@ DATA_FILE = os.path.expanduser("~/.codex/codexbar_data.json")
 CACHE_FILE = os.path.expanduser("~/.codex/codexbar_session_cache.json")
 AUTH_FILE = os.path.expanduser("~/.codex/auth.json")
 
-# Pricing table per 1M tokens ($) matching official CodexBar / models.dev catalog
-PRICING_PER_M = {
-    "gpt-5.6-sol": {"input": 4.0, "output": 20.0, "cache_read": 0.4, "cache_write": 5.0},
-    "gpt-5.6-terra": {"input": 2.0, "output": 12.0, "cache_read": 0.2, "cache_write": 2.5},
-    "gpt-5.6-luna": {"input": 0.2, "output": 1.2, "cache_read": 0.02, "cache_write": 0.25},
-    "gpt-6-astra": {"input": 10.0, "output": 50.0, "cache_read": 1.0, "cache_write": 12.5},
-    "gpt-6-sol": {"input": 2.0, "output": 10.0, "cache_read": 0.2, "cache_write": 2.5},
-    "gpt-6-luna": {"input": 0.1, "output": 0.5, "cache_read": 0.01, "cache_write": 0.125},
-    "astra": {"input": 10.0, "output": 50.0, "cache_read": 1.0, "cache_write": 12.5},
-    "codex-auto-review": {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0},
-    "default": {"input": 4.0, "output": 20.0, "cache_read": 0.4, "cache_write": 5.0}
+# CodexBar exact pricing table from CostUsagePricing.swift
+# All rates are per token (USD). Threshold: 272,000 input tokens.
+CODEX_PRICING = {
+    "gpt-5.6-sol": {
+        "input": 5e-6,
+        "output": 3e-5,
+        "cache_read": 5e-7,
+        "cache_write": 6.25e-6,
+        "threshold": 272_000,
+        "input_above": 1e-5,
+        "output_above": 4.5e-5,
+        "cache_read_above": 1e-6,
+        "cache_write_above": 1.25e-5,
+    },
+    "gpt-5.6-terra": {
+        "input": 2e-6,
+        "output": 1.2e-5,
+        "cache_read": 2e-7,
+        "cache_write": 2.5e-6,
+        "threshold": 272_000,
+        "input_above": 4e-6,
+        "output_above": 1.8e-5,
+        "cache_read_above": 4e-7,
+        "cache_write_above": 5e-6,
+    },
+    "gpt-5.6-luna": {
+        "input": 2e-7,
+        "output": 1.2e-6,
+        "cache_read": 2e-8,
+        "cache_write": 2.5e-7,
+        "threshold": 272_000,
+        "input_above": 4e-7,
+        "output_above": 1.8e-6,
+        "cache_read_above": 4e-8,
+        "cache_write_above": 5e-7,
+    },
+    "gpt-6-astra": {
+        "input": 1e-5,
+        "output": 5e-5,
+        "cache_read": 1e-6,
+        "cache_write": 1.25e-5,
+        "threshold": 272_000,
+        "input_above": 2e-5,
+        "output_above": 7.5e-5,
+        "cache_read_above": 2e-6,
+        "cache_write_above": 2.5e-5,
+    },
+    "gpt-5": {
+        "input": 1.25e-6,
+        "output": 1e-5,
+        "cache_read": 1.25e-7,
+    },
+    "gpt-5.1": {
+        "input": 1.25e-6,
+        "output": 1e-5,
+        "cache_read": 1.25e-7,
+    },
+    "gpt-5-mini": {
+        "input": 2.5e-7,
+        "output": 2e-6,
+        "cache_read": 2.5e-8,
+    },
+    "gpt-5.2": {
+        "input": 1.75e-6,
+        "output": 1.4e-5,
+        "cache_read": 1.75e-7,
+    },
+    "gpt-5.4": {
+        "input": 2.5e-6,
+        "output": 1.5e-5,
+        "cache_read": 2.5e-7,
+        "threshold": 272_000,
+        "input_above": 5e-6,
+        "output_above": 2.25e-5,
+        "cache_read_above": 5e-7,
+    },
+    "gpt-5.4-mini": {
+        "input": 7.5e-7,
+        "output": 4.5e-6,
+        "cache_read": 7.5e-8,
+    },
+    "codex-auto-review": {
+        "input": 0.0,
+        "output": 0.0,
+        "cache_read": 0.0,
+        "cache_write": 0.0,
+        "unpriced": True,
+    }
 }
 
-DISPLAY_NAMES = {
-    "gpt-5.6-sol": "gpt-5.6-sol",
-    "gpt-5.6-terra": "gpt-5.6-terra",
-    "gpt-5.6-luna": "gpt-5.6-luna",
-    "gpt-6-astra": "gpt-6-astra",
-    "astra": "gpt-6-astra",
-    "codex-auto-review": "Codex Auto Review",
-}
+def normalize_model(raw_model):
+    if not raw_model:
+        return "gpt-5.6-sol"
+    cleaned = raw_model.strip()
+    if cleaned.startswith("openai/"):
+        cleaned = cleaned[len("openai/"):]
+    # Strip reasoning effort suffix for base lookup
+    base = cleaned.replace(" (max)", "").strip()
+    if base in ("gpt-5.6", "sol", "gpt-6-sol"):
+        return "gpt-5.6-sol"
+    if base in ("luna", "gpt-reserve", "gpt-6-luna"):
+        return "gpt-5.6-luna"
+    if base in ("terra", "gpt-6-terra"):
+        return "gpt-5.6-terra"
+    if base in ("astra", "gpt-6-astra"):
+        return "gpt-6-astra"
+    return base
+
+def model_display_name(raw_model):
+    norm = normalize_model(raw_model)
+    if norm == "codex-auto-review":
+        return "Codex Auto Review"
+    return norm
+
+def calculate_codex_cost(model, input_tokens, output_tokens, cached_input_tokens=0, cache_write_tokens=0):
+    norm = normalize_model(model)
+    pricing = CODEX_PRICING.get(norm) or CODEX_PRICING["gpt-5.6-sol"]
+    if pricing.get("unpriced"):
+        return 0.0
+
+    # Codex/OpenAI reports input_tokens as total prompt size, with cached reads as a SUBSET of it.
+    total_input = max(0, input_tokens)
+    cached = min(max(0, cached_input_tokens), total_input)
+    remaining_after_cache = total_input - cached
+    cache_write = min(max(0, cache_write_tokens), remaining_after_cache)
+    non_cached = remaining_after_cache - cache_write
+
+    threshold = pricing.get("threshold")
+    uses_long_context = (threshold is not None and total_input > threshold)
+
+    input_rate = pricing.get("input_above", pricing["input"]) if uses_long_context else pricing["input"]
+    output_rate = pricing.get("output_above", pricing["output"]) if uses_long_context else pricing["output"]
+    cache_read_rate = pricing.get("cache_read_above" if uses_long_context else "cache_read", pricing.get("cache_read", input_rate))
+    cache_write_rate = pricing.get("cache_write_above" if uses_long_context else "cache_write", pricing.get("cache_write", input_rate))
+
+    cost = (
+        non_cached * input_rate +
+        cached * cache_read_rate +
+        cache_write * cache_write_rate +
+        max(0, output_tokens) * output_rate
+    )
+    return cost
 
 def format_tokens(num):
-    if num >= 1_000_000_000:
-        return f"{num / 1_000_000_000:.1f}B"
-    elif num >= 1_000_000:
-        return f"{num / 1_000_000:.1f}M"
-    elif num >= 1_000:
-        return f"{num / 1_000:.0f}K" if num >= 10_000 else f"{num / 1_000:.1f}K"
-    return str(num)
+    abs_num = abs(num)
+    sign = "-" if num < 0 else ""
+    if abs_num >= 999_500_000:
+        scaled = abs_num / 1_000_000_000
+        formatted = f"{scaled:.0f}" if scaled >= 10 else f"{scaled:.1f}".rstrip("0").rstrip(".")
+        return f"{sign}{formatted}B"
+    elif abs_num >= 999_500:
+        scaled = abs_num / 1_000_000
+        formatted = f"{scaled:.0f}" if scaled >= 10 else f"{scaled:.1f}".rstrip("0").rstrip(".")
+        return f"{sign}{formatted}M"
+    elif abs_num >= 1000:
+        scaled = abs_num / 1000
+        formatted = f"{scaled:.0f}" if scaled >= 10 else f"{scaled:.1f}".rstrip("0").rstrip(".")
+        return f"{sign}{formatted}K"
+    return f"{num}"
 
 def format_currency(val):
     return f"${val:,.2f}"
+
+def format_model_cost_detail(model_name, cost, tokens):
+    norm = normalize_model(model_name)
+    is_unpriced = CODEX_PRICING.get(norm, {}).get("unpriced", False) or cost <= 0
+    token_str = format_tokens(tokens)
+    if is_unpriced:
+        return token_str
+    return f"{format_currency(cost)} · {token_str}"
 
 def format_duration(seconds):
     if seconds <= 0:
@@ -274,20 +411,25 @@ def scan_sessions():
 
         for ev in data.get("events", []):
             ts = ev["ts"]
-            day_key = ts[:10]
+            dt_str = ts.replace("Z", "+00:00")
+            try:
+                dt = datetime.fromisoformat(dt_str)
+                day_key = dt.astimezone().strftime("%Y-%m-%d")
+            except Exception:
+                day_key = ts[:10]
+
             if day_key not in daily_records:
                 continue
 
             raw_model = ev["model"]
-            model_key = DISPLAY_NAMES.get(raw_model, raw_model)
-            base_model = raw_model.replace(" (max)", "")
-            rates = PRICING_PER_M.get(base_model) or PRICING_PER_M["default"]
-            cost = (
-                ev["inp"] * rates["input"] +
-                ev["out"] * rates["output"] +
-                ev["cached"] * rates["cache_read"] +
-                ev["cached_write"] * rates.get("cache_write", rates["input"])
-            ) / 1_000_000.0
+            disp_model = model_display_name(raw_model)
+            cost = calculate_codex_cost(
+                raw_model,
+                ev["inp"],
+                ev["out"],
+                ev.get("cached", 0),
+                ev.get("cached_write", 0)
+            )
 
             tot = ev["tot"]
             projects[proj_name]["tokens"] += tot
@@ -297,22 +439,22 @@ def scan_sessions():
             daily_records[day_key]["cost"] += cost
 
             day_models = daily_records[day_key]["models"]
-            if model_key not in day_models:
-                day_models[model_key] = {"tokens": 0, "cost": 0.0}
-            day_models[model_key]["tokens"] += tot
-            day_models[model_key]["cost"] += cost
+            if disp_model not in day_models:
+                day_models[disp_model] = {"tokens": 0, "cost": 0.0}
+            day_models[disp_model]["tokens"] += tot
+            day_models[disp_model]["cost"] += cost
 
             total_tokens_30d += tot
             total_cost_30d += cost
             if tot > 0:
                 latest_tokens = tot
 
-
     # Project list sorted by spend desc
     proj_list = sorted(projects.values(), key=lambda x: x["cost"], reverse=True)
     for p in proj_list:
         p["cost_formatted"] = format_currency(p["cost"])
         p["tokens_formatted"] = format_tokens(p["tokens"])
+        p["stats_formatted"] = f"{p['cost_formatted']} · {p['tokens_formatted']} tokens"
 
     # Daily list formatted
     daily_list = []
@@ -325,12 +467,14 @@ def scan_sessions():
         label = dt.strftime("%b %d") # e.g. Sep 23
         models_formatted = []
         for m_name, m_data in sorted(rec["models"].items(), key=lambda x: x[1]["tokens"], reverse=True):
+            detail_str = format_model_cost_detail(m_name, m_data["cost"], m_data["tokens"])
             models_formatted.append({
                 "name": m_name,
                 "cost": m_data["cost"],
                 "cost_formatted": format_currency(m_data["cost"]),
                 "tokens": m_data["tokens"],
-                "tokens_formatted": format_tokens(m_data["tokens"])
+                "tokens_formatted": format_tokens(m_data["tokens"]),
+                "detail": detail_str
             })
 
         daily_list.append({
@@ -385,7 +529,7 @@ def build_full_payload():
             weekly_used = pw.get("used_percent", weekly_used)
             weekly_reset_secs = pw.get("reset_after_seconds", weekly_reset_secs)
 
-        add_limits = usage_data.get("additional_rate_limits", [])
+        add_limits = usage_data.get("additional_rate_limits") or []
         for item in add_limits:
             if item.get("limit_name") == "gpt-reserve":
                 rw = item.get("rate_limit", {}).get("primary_window", {})
@@ -393,13 +537,13 @@ def build_full_payload():
                     reserve_used = rw.get("used_percent", reserve_used)
                     reserve_reset_secs = rw.get("reset_after_seconds", reserve_reset_secs)
 
-        model_usage = usage_data.get("model_usage", {})
+        model_usage = usage_data.get("model_usage") or {}
         if model_usage:
             top_model = list(model_usage.keys())[0]
 
     if credits_data:
         reset_credits_count = credits_data.get("available_count", reset_credits_count)
-        credits_list = credits_data.get("credits", [])
+        credits_list = credits_data.get("credits") or []
         if credits_list:
             credits_expiry_texts = [format_credit_expiry(c.get("expires_at", "")) for c in credits_list if c.get("status") == "available"]
 
