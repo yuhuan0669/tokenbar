@@ -63,25 +63,18 @@ CODEX_PRICING = {
         "cache_read_above": 2e-6,
         "cache_write_above": 2.5e-5,
     },
-    "gpt-5": {
-        "input": 1.25e-6,
-        "output": 1e-5,
-        "cache_read": 1.25e-7,
+    "gpt-5.5": {
+        "input": 5e-6,
+        "output": 3e-5,
+        "cache_read": 5e-7,
+        "threshold": 272_000,
+        "input_above": 1e-5,
+        "output_above": 4.5e-5,
+        "cache_read_above": 1e-6,
     },
-    "gpt-5.1": {
-        "input": 1.25e-6,
-        "output": 1e-5,
-        "cache_read": 1.25e-7,
-    },
-    "gpt-5-mini": {
-        "input": 2.5e-7,
-        "output": 2e-6,
-        "cache_read": 2.5e-8,
-    },
-    "gpt-5.2": {
-        "input": 1.75e-6,
-        "output": 1.4e-5,
-        "cache_read": 1.75e-7,
+    "gpt-5.5-pro": {
+        "input": 3e-5,
+        "output": 1.8e-4,
     },
     "gpt-5.4": {
         "input": 2.5e-6,
@@ -96,6 +89,85 @@ CODEX_PRICING = {
         "input": 7.5e-7,
         "output": 4.5e-6,
         "cache_read": 7.5e-8,
+    },
+    "gpt-5.4-nano": {
+        "input": 2e-7,
+        "output": 1.25e-6,
+        "cache_read": 2e-8,
+    },
+    "gpt-5.4-pro": {
+        "input": 3e-5,
+        "output": 1.8e-4,
+    },
+    "gpt-5.3-codex": {
+        "input": 1.75e-6,
+        "output": 1.4e-5,
+        "cache_read": 1.75e-7,
+    },
+    "gpt-5.3-codex-spark": {
+        "input": 0.0,
+        "output": 0.0,
+        "cache_read": 0.0,
+        "display_label": "Research Preview",
+        "unpriced": True,
+    },
+    "gpt-5.2": {
+        "input": 1.75e-6,
+        "output": 1.4e-5,
+        "cache_read": 1.75e-7,
+    },
+    "gpt-5.2-codex": {
+        "input": 1.75e-6,
+        "output": 1.4e-5,
+        "cache_read": 1.75e-7,
+    },
+    "gpt-5.2-pro": {
+        "input": 2.1e-5,
+        "output": 1.68e-4,
+    },
+    "gpt-5.1": {
+        "input": 1.25e-6,
+        "output": 1e-5,
+        "cache_read": 1.25e-7,
+    },
+    "gpt-5.1-codex": {
+        "input": 1.25e-6,
+        "output": 1e-5,
+        "cache_read": 1.25e-7,
+    },
+    "gpt-5.1-codex-max": {
+        "input": 1.25e-6,
+        "output": 1e-5,
+        "cache_read": 1.25e-7,
+    },
+    "gpt-5.1-codex-mini": {
+        "input": 2.5e-7,
+        "output": 2e-6,
+        "cache_read": 2.5e-8,
+    },
+    "gpt-5": {
+        "input": 1.25e-6,
+        "output": 1e-5,
+        "cache_read": 1.25e-7,
+    },
+    "gpt-5-codex": {
+        "input": 1.25e-6,
+        "output": 1e-5,
+        "cache_read": 1.25e-7,
+    },
+    "gpt-5-mini": {
+        "input": 2.5e-7,
+        "output": 2e-6,
+        "cache_read": 2.5e-8,
+    },
+    "gpt-5-nano": {
+        "input": 5e-8,
+        "output": 4e-7,
+        "cache_read": 5e-9,
+    },
+    "gpt-5-pro": {
+        "input": 1.5e-5,
+        "output": 1.2e-4,
     },
     "codex-auto-review": {
         "input": 0.0,
@@ -181,9 +253,12 @@ def format_currency(val):
 
 def format_model_cost_detail(model_name, cost, tokens):
     norm = normalize_model(model_name)
-    is_unpriced = CODEX_PRICING.get(norm, {}).get("unpriced", False) or cost <= 0
+    pricing = CODEX_PRICING.get(norm, {})
+    disp_label = pricing.get("display_label")
     token_str = format_tokens(tokens)
-    if is_unpriced:
+    if disp_label:
+        return f"{disp_label} · {token_str}"
+    if pricing.get("unpriced") or cost <= 0:
         return token_str
     return f"{format_currency(cost)} · {token_str}"
 
@@ -277,16 +352,42 @@ def fetch_api_data():
 
     return usage_data, credits_data
 
+HOME_CODEX_WORKTREES = os.path.expanduser("~/.codex/worktrees")
+WORKTREE_CACHE = {}
+
+def canonicalize_worktree_path(cwd):
+    if not cwd or cwd == "unknown":
+        return None
+    if cwd in WORKTREE_CACHE:
+        return WORKTREE_CACHE[cwd]
+
+    resolved = os.path.abspath(os.path.expanduser(cwd))
+    if HOME_CODEX_WORKTREES in resolved or "/.codex/worktrees/" in resolved:
+        try:
+            res = subprocess.run(
+                ["git", "-C", resolved, "worktree", "list", "--porcelain"],
+                capture_output=True, text=True, timeout=1.0
+            )
+            if res.returncode == 0 and res.stdout:
+                for line in res.stdout.splitlines():
+                    if line.startswith("worktree "):
+                        wt = line[len("worktree "):].strip()
+                        if "/.codex/worktrees" not in wt and not wt.startswith("/private/tmp"):
+                            resolved = wt
+                            break
+        except Exception:
+            pass
+
+    WORKTREE_CACHE[cwd] = resolved
+    return resolved
+
 def resolve_project_root(cwd):
     if not cwd or cwd == "unknown":
-        return "Chats", "unknown"
-    p = os.path.abspath(cwd)
-    curr = p
-    while curr and curr != "/":
-        if os.path.exists(os.path.join(curr, ".git")):
-            return os.path.basename(curr), curr
-        curr = os.path.dirname(curr)
-    return os.path.basename(p), p
+        return "Unknown project", "unknown"
+    p = canonicalize_worktree_path(cwd) or cwd
+    p = os.path.abspath(p)
+    name = os.path.basename(p) or p
+    return name, p
 
 def scan_sessions():
     now = datetime.now()
@@ -342,21 +443,27 @@ def scan_sessions():
 
                     if t == "turn_context":
                         turn_id = payload.get("turn_id")
-                        m = payload.get("model")
-                        eff = payload.get("effort") or payload.get("collaboration_mode", {}).get("settings", {}).get("reasoning_effort")
+                        m = (
+                            payload.get("model")
+                            or payload.get("model_name")
+                            or payload.get("info", {}).get("model")
+                            or payload.get("info", {}).get("model_name")
+                            or payload.get("collaboration_mode", {}).get("settings", {}).get("model")
+                        )
                         if m:
-                            label = f"{m} (max)" if eff == "max" else m
+                            current_model = m
                             if turn_id:
-                                turn_models[turn_id] = label
-                            current_model = label
-                    elif t == "event_msg" and "thread_settings" in payload:
+                                turn_models[turn_id] = m
+                    elif t == "event_msg":
                         ts_info = payload.get("thread_settings", {})
-                        m = ts_info.get("model")
-                        eff = ts_info.get("reasoning_effort")
+                        m = (
+                            ts_info.get("model")
+                            or ts_info.get("model_name")
+                            or ts_info.get("collaboration_mode", {}).get("settings", {}).get("model")
+                        )
                         if m:
-                            label = f"{m} (max)" if eff == "max" else m
-                            thread_model = label
-                            current_model = label
+                            thread_model = m
+                            current_model = m
                     elif t == "token_usage_record" or "usage" in payload:
                         usage = payload.get("usage") or payload.get("token_usage")
                         if usage and isinstance(usage, dict):
@@ -366,7 +473,8 @@ def scan_sessions():
                             cached_write = usage.get("cache_write_input_tokens", 0) or 0
                             tot = usage.get("total_tokens", 0) or (inp + out)
                             turn_id = payload.get("turn_id")
-                            model = turn_models.get(turn_id) or current_model or thread_model or "gpt-5.6-sol"
+                            rec_model = payload.get("model") or usage.get("model")
+                            model = turn_models.get(turn_id) or rec_model or current_model or thread_model or "gpt-5.6-sol"
                             ts = data.get("timestamp") or datetime.fromtimestamp(mtime).isoformat()
                             events.append({
                                 "inp": inp,
@@ -396,7 +504,6 @@ def scan_sessions():
     daily_records = {} # day_key -> {tokens, cost, models: {name: {tokens, cost}}}
     total_tokens_30d = 0
     total_cost_30d = 0.0
-    latest_tokens = 0
 
     # Ensure all past 30 days are in daily_records
     for i in range(29, -1, -1):
@@ -446,11 +553,9 @@ def scan_sessions():
 
             total_tokens_30d += tot
             total_cost_30d += cost
-            if tot > 0:
-                latest_tokens = tot
 
-    # Project list sorted by spend desc
-    proj_list = sorted(projects.values(), key=lambda x: x["cost"], reverse=True)
+    # Project list sorted by spend desc, tokens desc, name asc (CostUsageScanner+Projects.swift)
+    proj_list = sorted(projects.values(), key=lambda x: (-x["cost"], -x["tokens"], x["name"].lower()))
     for p in proj_list:
         p["cost_formatted"] = format_currency(p["cost"])
         p["tokens_formatted"] = format_tokens(p["tokens"])
@@ -466,7 +571,9 @@ def scan_sessions():
         dt = datetime.strptime(d_key, "%Y-%m-%d")
         label = dt.strftime("%b %d") # e.g. Sep 23
         models_formatted = []
-        for m_name, m_data in sorted(rec["models"].items(), key=lambda x: x[1]["tokens"], reverse=True):
+        # Sort models by (cost desc, tokens desc, name asc) matching CostUsageScanner+CacheHelpers.swift
+        sorted_models = sorted(rec["models"].items(), key=lambda x: (-x[1]["cost"], -x[1]["tokens"], x[0]))
+        for m_name, m_data in sorted_models:
             detail_str = format_model_cost_detail(m_name, m_data["cost"], m_data["tokens"])
             models_formatted.append({
                 "name": m_name,
@@ -489,6 +596,12 @@ def scan_sessions():
 
         if d_key == today_key:
             today_cost = rec["cost"]
+
+    # Latest active day tokens matching CodexBar InlineUsageDashboardContent
+    latest_tokens = 0
+    active_days = [d for d in daily_list if d["tokens"] > 0]
+    if active_days:
+        latest_tokens = active_days[-1]["tokens"]
 
     return {
         "daily": daily_list,
