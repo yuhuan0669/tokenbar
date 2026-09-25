@@ -186,13 +186,13 @@ def normalize_model(raw_model):
         cleaned = cleaned[len("openai/"):]
     # Strip reasoning effort suffix for base lookup
     base = cleaned.replace(" (max)", "").strip()
-    if base in ("gpt-5.6", "sol", "gpt-6-sol"):
+    if base in ("gpt-5.6", "sol"):
         return "gpt-5.6-sol"
-    if base in ("luna", "gpt-reserve", "gpt-6-luna"):
+    if base in ("gpt-reserve", "luna"):
         return "gpt-5.6-luna"
-    if base in ("terra", "gpt-6-terra"):
+    if base == "terra":
         return "gpt-5.6-terra"
-    if base in ("astra", "gpt-6-astra"):
+    if base == "astra":
         return "gpt-6-astra"
     return base
 
@@ -202,9 +202,146 @@ def model_display_name(raw_model):
         return "Codex Auto Review"
     return norm
 
+# Three-tier pricing resolution matching CodexBar:
+# Resolution order: custom overlay > models.dev dynamic catalog > bundled fallback table
+MODELS_DEV_CACHE = os.path.expanduser("~/Library/Caches/CodexBar/model-pricing/models-dev-v1.json")
+CUSTOM_PRICING_FILE = os.path.expanduser("~/Library/Application Support/CodexBar/custom-pricing.json")
+CUSTOM_PRICING_ALT = os.path.expanduser("~/.codex/custom-pricing.json")
+
+CUSTOM_OVERLAYS = {}
+MODELS_DEV_CATALOG = {}
+
+def load_custom_pricing():
+    for path in [CUSTOM_PRICING_FILE, CUSTOM_PRICING_ALT]:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", errors="ignore") as f:
+                    raw = json.load(f)
+                overlays = {}
+                for k, v in raw.items():
+                    if not isinstance(v, dict):
+                        continue
+                    key = normalize_model(k)
+                    entry = {}
+                    if "input" in v and v["input"] is not None:
+                        entry["input"] = float(v["input"]) / 1e6
+                    if "output" in v and v["output"] is not None:
+                        entry["output"] = float(v["output"]) / 1e6
+                    cr = v.get("cache_read", v.get("cacheRead"))
+                    if cr is not None:
+                        entry["cache_read"] = float(cr) / 1e6
+                    cw = v.get("cache_write", v.get("cacheWrite"))
+                    if cw is not None:
+                        entry["cache_write"] = float(cw) / 1e6
+                    if "threshold" in v and v["threshold"] is not None:
+                        entry["threshold"] = int(v["threshold"])
+                    if "input_above" in v and v["input_above"] is not None:
+                        entry["input_above"] = float(v["input_above"]) / 1e6
+                    if "output_above" in v and v["output_above"] is not None:
+                        entry["output_above"] = float(v["output_above"]) / 1e6
+                    cr_a = v.get("cache_read_above", v.get("cacheReadAbove"))
+                    if cr_a is not None:
+                        entry["cache_read_above"] = float(cr_a) / 1e6
+                    cw_a = v.get("cache_write_above", v.get("cacheWriteAbove"))
+                    if cw_a is not None:
+                        entry["cache_write_above"] = float(cw_a) / 1e6
+                    overlays[key] = entry
+                return overlays
+            except Exception as e:
+                print(f"Notice: Failed to load custom pricing from {path}: {e}", file=sys.stderr)
+    return {}
+
+def load_models_dev_pricing():
+    os.makedirs(os.path.dirname(MODELS_DEV_CACHE), exist_ok=True)
+    raw_data = None
+    need_refresh = True
+
+    if os.path.exists(MODELS_DEV_CACHE):
+        age = time.time() - os.path.getmtime(MODELS_DEV_CACHE)
+        if age < 86400:  # Cached copy valid for 24h
+            try:
+                with open(MODELS_DEV_CACHE, "r", errors="ignore") as f:
+                    raw_data = json.load(f)
+                need_refresh = False
+            except Exception:
+                need_refresh = True
+
+    if need_refresh:
+        try:
+            cmd = ["curl", "-s", "--compressed", "--max-time", "10", "https://models.dev/api.json"]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0 and res.stdout.strip():
+                raw_data = json.loads(res.stdout)
+                with open(MODELS_DEV_CACHE, "w") as f:
+                    f.write(res.stdout)
+        except Exception:
+            pass
+
+    # Fall back to existing cached copy if fresh network fetch failed
+    if raw_data is None and os.path.exists(MODELS_DEV_CACHE):
+        try:
+            with open(MODELS_DEV_CACHE, "r", errors="ignore") as f:
+                raw_data = json.load(f)
+        except Exception:
+            pass
+
+    if not raw_data:
+        return {}
+
+    catalog = {}
+    openai_models = raw_data.get("openai", {}).get("models", {})
+    for m_id, m_info in openai_models.items():
+        cost = m_info.get("cost", {})
+        inp = cost.get("input")
+        out = cost.get("output")
+        if inp is None or out is None:
+            continue
+        entry = {
+            "input": float(inp) / 1e6,
+            "output": float(out) / 1e6,
+        }
+        cr = cost.get("cache_read")
+        if cr is not None:
+            entry["cache_read"] = float(cr) / 1e6
+        cw = cost.get("cache_write")
+        if cw is not None:
+            entry["cache_write"] = float(cw) / 1e6
+        ctx = cost.get("context_over_200k")
+        if ctx and isinstance(ctx, dict):
+            entry["threshold"] = 272_000 if any(k in m_id for k in ("gpt-5.6", "gpt-6", "gpt-5.4", "gpt-5.5")) else 200_000
+            if ctx.get("input") is not None:
+                entry["input_above"] = float(ctx["input"]) / 1e6
+            if ctx.get("output") is not None:
+                entry["output_above"] = float(ctx["output"]) / 1e6
+            if ctx.get("cache_read") is not None:
+                entry["cache_read_above"] = float(ctx["cache_read"]) / 1e6
+            if ctx.get("cache_write") is not None:
+                entry["cache_write_above"] = float(ctx["cache_write"]) / 1e6
+
+        norm_key = normalize_model(m_id)
+        catalog[norm_key] = entry
+    return catalog
+
+def init_pricing():
+    global CUSTOM_OVERLAYS, MODELS_DEV_CATALOG
+    CUSTOM_OVERLAYS = load_custom_pricing()
+    MODELS_DEV_CATALOG = load_models_dev_pricing()
+
+init_pricing()
+
+def get_model_pricing(norm_model):
+    # 1. Custom overlay takes highest precedence
+    if norm_model in CUSTOM_OVERLAYS:
+        return CUSTOM_OVERLAYS[norm_model]
+    # 2. models.dev live catalog takes second precedence
+    if norm_model in MODELS_DEV_CATALOG:
+        return MODELS_DEV_CATALOG[norm_model]
+    # 3. Builtin fallback
+    return CODEX_PRICING.get(norm_model) or CODEX_PRICING["gpt-5.6-sol"]
+
 def calculate_codex_cost(model, input_tokens, output_tokens, cached_input_tokens=0, cache_write_tokens=0):
     norm = normalize_model(model)
-    pricing = CODEX_PRICING.get(norm) or CODEX_PRICING["gpt-5.6-sol"]
+    pricing = get_model_pricing(norm)
     if pricing.get("unpriced"):
         return 0.0
 
@@ -253,7 +390,7 @@ def format_currency(val):
 
 def format_model_cost_detail(model_name, cost, tokens):
     norm = normalize_model(model_name)
-    pricing = CODEX_PRICING.get(norm, {})
+    pricing = get_model_pricing(norm)
     disp_label = pricing.get("display_label")
     token_str = format_tokens(tokens)
     if disp_label:
@@ -390,6 +527,7 @@ def resolve_project_root(cwd):
     return name, p
 
 def scan_sessions():
+    init_pricing()
     now = datetime.now()
     thirty_days_ago = now - timedelta(days=30)
     
