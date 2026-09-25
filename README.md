@@ -54,11 +54,11 @@ chmod +x build.sh
 ./build.sh
 ```
 
-The script compiles the Swift application, bundles the UI and scanner assets, and installs `CodexBar.app` directly into `~/Applications/CodexBar.app`.
+The script compiles the Swift application, bundles the UI and scanner assets, and installs `TokenBar.app` directly into `~/Applications/TokenBar.app`.
 
 ### Launch
 ```bash
-open ~/Applications/CodexBar.app
+open ~/Applications/TokenBar.app
 ```
 
 ---

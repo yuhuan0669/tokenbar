@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-class CodexBarAppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate {
+class TokenBarAppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     var statusItem: NSStatusItem!
     var popover: NSPopover!
     var webView: WKWebView!
@@ -167,7 +167,7 @@ class CodexBarAppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandl
             let resetText = weekly["reset_text"] as? String ?? ""
             let shortReset = resetText.replacingOccurrences(of: "Resets in ", with: "")
             statusItem.button?.title = " 🎚️ \(leftPct)%"
-            statusItem.button?.toolTip = "Codex: \(leftPct)% left (Resets in \(shortReset))"
+            statusItem.button?.toolTip = "TokenBar: \(leftPct)% left (Resets in \(shortReset))"
         }
 
         // Escape JSON for injection into JavaScript
@@ -212,6 +212,6 @@ class CodexBarAppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandl
 
 // Main entry point
 let app = NSApplication.shared
-let delegate = CodexBarAppDelegate()
+let delegate = TokenBarAppDelegate()
 app.delegate = delegate
 app.run()

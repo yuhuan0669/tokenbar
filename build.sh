@@ -3,11 +3,11 @@ set -e
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$DIR/build"
-APP_NAME="CodexBar"
+APP_NAME="TokenBar"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 DEST_DIR="$HOME/Applications"
 
-echo "=== Building CodexBar for macOS 13 (Ventura) ==="
+echo "=== Building TokenBar for macOS 13 (Ventura) ==="
 
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/bin"
@@ -34,13 +34,13 @@ cat << 'EOF' > "$APP_BUNDLE/Contents/Info.plist"
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>CodexBar</string>
+    <string>TokenBar</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.codexbar.ventura</string>
+    <string>com.tokenbar.ventura</string>
     <key>CFBundleName</key>
-    <string>CodexBar</string>
+    <string>TokenBar</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -59,6 +59,7 @@ EOF
 
 echo "4. Deploying to $DEST_DIR..."
 mkdir -p "$DEST_DIR"
+rm -rf "$DEST_DIR/CodexBar.app"
 rm -rf "$DEST_DIR/$APP_NAME.app"
 cp -R "$APP_BUNDLE" "$DEST_DIR/"
 

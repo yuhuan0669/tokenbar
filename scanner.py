@@ -202,17 +202,19 @@ def model_display_name(raw_model):
         return "Codex Auto Review"
     return norm
 
-# Three-tier pricing resolution matching CodexBar:
+# Three-tier pricing resolution matching TokenBar:
 # Resolution order: custom overlay > models.dev dynamic catalog > bundled fallback table
-MODELS_DEV_CACHE = os.path.expanduser("~/Library/Caches/CodexBar/model-pricing/models-dev-v1.json")
-CUSTOM_PRICING_FILE = os.path.expanduser("~/Library/Application Support/CodexBar/custom-pricing.json")
-CUSTOM_PRICING_ALT = os.path.expanduser("~/.codex/custom-pricing.json")
+MODELS_DEV_CACHE = os.path.expanduser("~/Library/Caches/TokenBar/model-pricing/models-dev-v1.json")
+MODELS_DEV_CACHE_ALT = os.path.expanduser("~/Library/Caches/CodexBar/model-pricing/models-dev-v1.json")
+CUSTOM_PRICING_FILE = os.path.expanduser("~/Library/Application Support/TokenBar/custom-pricing.json")
+CUSTOM_PRICING_ALT = os.path.expanduser("~/Library/Application Support/CodexBar/custom-pricing.json")
+CUSTOM_PRICING_USER = os.path.expanduser("~/.codex/custom-pricing.json")
 
 CUSTOM_OVERLAYS = {}
 MODELS_DEV_CATALOG = {}
 
 def load_custom_pricing():
-    for path in [CUSTOM_PRICING_FILE, CUSTOM_PRICING_ALT]:
+    for path in [CUSTOM_PRICING_FILE, CUSTOM_PRICING_ALT, CUSTOM_PRICING_USER]:
         if os.path.exists(path):
             try:
                 with open(path, "r", errors="ignore") as f:
@@ -256,15 +258,17 @@ def load_models_dev_pricing():
     raw_data = None
     need_refresh = True
 
-    if os.path.exists(MODELS_DEV_CACHE):
-        age = time.time() - os.path.getmtime(MODELS_DEV_CACHE)
-        if age < 86400:  # Cached copy valid for 24h
-            try:
-                with open(MODELS_DEV_CACHE, "r", errors="ignore") as f:
-                    raw_data = json.load(f)
-                need_refresh = False
-            except Exception:
-                need_refresh = True
+    for cache_path in [MODELS_DEV_CACHE, MODELS_DEV_CACHE_ALT]:
+        if os.path.exists(cache_path):
+            age = time.time() - os.path.getmtime(cache_path)
+            if age < 86400:  # Cached copy valid for 24h
+                try:
+                    with open(cache_path, "r", errors="ignore") as f:
+                        raw_data = json.load(f)
+                    need_refresh = False
+                    break
+                except Exception:
+                    need_refresh = True
 
     if need_refresh:
         try:
@@ -278,12 +282,16 @@ def load_models_dev_pricing():
             pass
 
     # Fall back to existing cached copy if fresh network fetch failed
-    if raw_data is None and os.path.exists(MODELS_DEV_CACHE):
-        try:
-            with open(MODELS_DEV_CACHE, "r", errors="ignore") as f:
-                raw_data = json.load(f)
-        except Exception:
-            pass
+    if raw_data is None:
+        for cache_path in [MODELS_DEV_CACHE, MODELS_DEV_CACHE_ALT]:
+            if os.path.exists(cache_path):
+                try:
+                    with open(cache_path, "r", errors="ignore") as f:
+                        raw_data = json.load(f)
+                    if raw_data:
+                        break
+                except Exception:
+                    pass
 
     if not raw_data:
         return {}
@@ -454,7 +462,7 @@ def fetch_api_data():
         "curl", "-s", "--max-time", "6",
         "https://chatgpt.com/backend-api/wham/usage",
         "-H", f"Authorization: Bearer {access_token}",
-        "-H", "User-Agent: CodexBar",
+        "-H", "User-Agent: TokenBar",
         "-H", "Accept: application/json",
     ]
     if account_id:
@@ -473,7 +481,7 @@ def fetch_api_data():
         "curl", "-s", "--max-time", "6",
         "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
         "-H", f"Authorization: Bearer {access_token}",
-        "-H", "User-Agent: CodexBar",
+        "-H", "User-Agent: TokenBar",
         "-H", "Accept: application/json",
     ]
     if account_id:
