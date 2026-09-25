@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>CodexBar</title>
+  <style>
+    :root {
+      --card-bg: #ffffff;
+      --card-text: #0f172a;
+      --card-muted: #64748b;
+      --card-dim: #94a3b8;
+      --card-divider: #e2e8f0;
+      --card-bar-bg: #e2e8f0;
+      --card-bar-filled: #029dbb;
+      --card-btn-bg: #f8fafc;
+      --card-btn-border: #cbd5e1;
+
+      --dash-bg: #f8fafc;
+      --dash-text: #0f172a;
+      --dash-muted: #64748b;
+      --dash-teal: #029dbb;
+      --dash-gold: #f59e0b;
+      --dash-pill-bg: #e2e8f0;
+      --dash-pill-active: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
+    }
+
+    body {
+      background: transparent;
+      width: 360px;
+      margin: 0 auto;
+      overflow-x: hidden;
+      color: var(--card-text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Outer Wrapper with smooth view switching */
+    .views-slider {
+      display: flex;
+      width: 720px;
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .views-slider.show-dashboard {
+      transform: translateX(-360px);
+    }
+
+    .view-container {
+      width: 360px;
+      min-width: 360px;
+      max-width: 360px;
+      min-height: 520px;
+      flex-shrink: 0;
+      box-sizing: border-box;
+      padding: 10px;
+      overflow: hidden;
+    }
+
+    /* ============================================================ */
+    /* VIEW 1: MAIN CARD                                            */
+    /* ============================================================ */
+    .card-view {
+      background: var(--card-bg);
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+      position: relative;
+      color: var(--card-text);
+      width: 100%;
+      min-height: 500px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+    }
+
+    .icon-btn {
+      background: var(--card-btn-bg);
+      border: 1px solid var(--card-btn-border);
+      color: var(--card-muted);
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .icon-btn:hover {
+      background: #e2e8f0;
+      color: var(--card-text);
+    }
+
+    /* Header */
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 14px;
+    }
+
+    .header-left .provider-name {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      line-height: 1.2;
+      color: var(--card-text);
+    }
+
+    .header-left .update-time {
+      font-size: 12px;
+      color: var(--card-muted);
+      margin-top: 2px;
+    }
+
+    .header-right {
+      text-align: right;
+    }
+
+    .header-right .account-email {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--card-text);
+      max-width: 170px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+    }
+    .header-right .account-email:hover { text-decoration: underline; }
+
+    .header-right .plan-badge {
+      font-size: 12px;
+      color: var(--card-muted);
+      margin-top: 2px;
+      font-weight: 500;
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--card-divider);
+      margin: 12px 0;
+    }
+
+    /* Rate Limit Sections */
+    .limit-block {
+      margin-bottom: 12px;
+    }
+
+    .limit-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+    }
+
+    .limit-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      color: var(--card-text);
+    }
+
+    .limit-reset {
+      font-size: 13px;
+      color: var(--card-muted);
+      font-weight: 400;
+    }
+
+    /* Segmented Progress Bar */
+    .segmented-bar {
+      display: flex;
+      gap: 3px;
+      height: 8px;
+      width: 100%;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+
+    .segment {
+      flex: 1;
+      height: 100%;
+      background: var(--card-bar-bg);
+      border-radius: 2px;
+      position: relative;
+    }
+
+    .segment.filled {
+      background: var(--card-bar-filled);
+    }
+
+    .segment.partial::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: var(--partial-pct, 50%);
+      background: var(--card-bar-filled);
+      border-radius: 2px;
+    }
+
+    .limit-subtitle {
+      font-size: 12px;
+      color: var(--card-muted);
+      letter-spacing: -0.1px;
+    }
+
+    /* Reset Credits */
+    .credits-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      color: var(--card-text);
+    }
+
+    .credits-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .credits-count {
+      font-weight: 600;
+      color: var(--card-text);
+    }
+
+    .credits-expiry {
+      color: var(--card-muted);
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* Stats 2x2 Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 20px;
+      row-gap: 10px;
+      margin: 12px 0 14px 0;
+    }
+
+    .stat-item .stat-label {
+      font-size: 12px;
+      color: var(--card-muted);
+      margin-bottom: 2px;
+    }
+
+    .stat-item .stat-value {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--card-text);
+    }
+
+    /* Sparkline Histogram */
+    .sparkline-container {
+      position: relative;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+
+    .sparkline-max {
+      position: absolute;
+      top: -16px;
+      right: 0;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--card-muted);
+    }
+
+    .sparkline-bars {
+      display: flex;
+      align-items: flex-end;
+      height: 38px;
+      gap: 3px;
+      padding-top: 6px;
+    }
+
+    .sparkline-bar {
+      flex: 1;
+      background: #e2e8f0;
+      border-radius: 1.5px 1.5px 0 0;
+      min-height: 2px;
+      transition: background 0.15s, height 0.2s;
+    }
+
+    .sparkline-bar.active,
+    .sparkline-bar:hover {
+      background: var(--dash-teal);
+    }
+
+    /* Footer & View Switcher */
+    .card-footer {
+      margin-top: 12px;
+      padding-top: 6px;
+    }
+
+    .footer-meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .footer-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .top-model {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--card-text);
+      margin-bottom: 2px;
+    }
+
+    .disclaimer {
+      font-size: 11px;
+      color: var(--card-dim);
+    }
+
+    .switch-view-btn {
+      width: 100%;
+      margin-top: 10px;
+      padding: 8px 12px;
+      background: var(--dash-bg);
+      border: 1px solid var(--card-btn-border);
+      border-radius: 8px;
+      color: var(--card-text);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .switch-view-btn:hover {
+      background: #f1f5f9;
+      border-color: #94a3b8;
+    }
+
+    /* ============================================================ */
+    /* VIEW 2: DETAILED SPEND / TOKEN DASHBOARD (Screenshots 1 & 2) */
+    /* ============================================================ */
+    .dashboard-view {
+      background: #ffffff;
+      color: var(--dash-text);
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+      width: 100%;
+      max-height: 500px;
+      min-height: 500px;
+      box-sizing: border-box;
+      overflow-y: auto;
+    }
+
+    /* Dashboard Header */
+    .dash-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .back-btn {
+      background: none;
+      border: none;
+      color: var(--dash-teal);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .back-btn:hover { text-decoration: underline; }
+
+    /* Toggle Pills (Token / Cost) */
+    .toggle-pills {
+      display: flex;
+      background: var(--dash-pill-bg);
+      border-radius: 7px;
+      padding: 2px;
+    }
+
+    .pill-btn {
+      border: none;
+      background: none;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--dash-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .pill-btn.active {
+      background: var(--dash-pill-active);
+      color: var(--dash-text);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    /* Main Chart Area */
+    .chart-container {
+      position: relative;
+      height: 180px;
+      margin: 10px 0 14px 0;
+      display: flex;
+    }
+
+    .y-axis-labels {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding-right: 8px;
+      font-size: 11px;
+      color: #94a3b8;
+      font-weight: 500;
+      text-align: right;
+      width: 48px;
+      flex-shrink: 0;
+    }
+
+    .bars-area {
+      flex: 1;
+      height: 100%;
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      position: relative;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 2px;
+    }
+
+    .dash-bar-wrap {
+      flex: 1;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .dash-bar {
+      width: 100%;
+      background: var(--dash-teal);
+      border-radius: 1.5px 1.5px 0 0;
+      min-height: 2px;
+      position: relative;
+      transition: height 0.2s, background 0.15s;
+    }
+
+    .dash-bar.has-gold-tip::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: var(--dash-gold);
+      border-radius: 1.5px 1.5px 0 0;
+    }
+
+    .dash-bar-wrap.selected .dash-bar,
+    .dash-bar-wrap:hover .dash-bar {
+      opacity: 0.85;
+      outline: 1.5px solid #0f172a;
+    }
+
+    .chart-x-label {
+      position: absolute;
+      right: 0;
+      bottom: -18px;
+      font-size: 11px;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+
+    /* Selected Day Detail Box */
+    .day-detail-box {
+      margin-top: 22px;
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      background: #f8fafc;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .day-detail-header {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--dash-text);
+      margin-bottom: 6px;
+    }
+
+    .day-models-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .day-model-row {
+      display: flex;
+      align-items: center;
+      font-size: 12px;
+      color: var(--dash-text);
+    }
+
+    .model-color-bar {
+      width: 2.5px;
+      height: 14px;
+      background: var(--dash-teal);
+      border-radius: 2px;
+      margin-right: 6px;
+    }
+
+    .model-name {
+      font-weight: 600;
+      margin-right: 6px;
+    }
+
+    .model-val {
+      color: var(--dash-muted);
+    }
+
+    /* 30-Day Estimated Total */
+    .est-total-box {
+      margin: 14px 0;
+    }
+
+    .est-total-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--dash-text);
+    }
+
+    .est-total-sub {
+      font-size: 11px;
+      color: var(--dash-muted);
+      margin-top: 1px;
+    }
+
+    /* Projects List */
+    .projects-section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--dash-text);
+      margin-bottom: 8px;
+    }
+
+    .project-item {
+      padding: 7px 0;
+      border-bottom: 1px solid #f1f5f9;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .project-item:hover { background: #f8fafc; }
+
+    .project-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 13px;
+    }
+
+    .project-name {
+      font-weight: 600;
+      color: var(--dash-text);
+    }
+
+    .project-stats {
+      font-weight: 500;
+      color: var(--dash-muted);
+      font-size: 12px;
+    }
+
+    .project-path {
+      font-size: 11px;
+      color: #94a3b8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 1px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="views-slider" id="slider">
+
+    <!-- VIEW 1: MAIN CARD (Screenshot 3) -->
+    <div class="view-container">
+      <div class="card-view">
+        
+        <div>
+          <!-- Header -->
+          <div class="card-header">
+            <div class="header-left">
+              <div class="provider-name">Codex</div>
+              <div class="update-time" id="cardUpdateTime">Updated just now</div>
+            </div>
+            <div class="header-right">
+              <div class="account-email" id="cardEmail" title="Click to view details" onclick="showDashboard()">user@domain.com &rsaquo;</div>
+              <div class="plan-badge" id="cardPlan">Pro 5x</div>
+            </div>
+          </div>
+
+          <!-- Weekly Quota -->
+          <div class="limit-block">
+            <div class="limit-row">
+              <span class="limit-title" id="weeklyTitle">Weekly 31% left</span>
+              <span class="limit-reset" id="weeklyReset">Resets in 2d 23h</span>
+            </div>
+            <div class="segmented-bar" id="weeklyBar"></div>
+            <div class="limit-subtitle" id="weeklySubtitle">12% in deficit &middot; Runs out in 1d 19h</div>
+          </div>
+
+          <!-- gpt-reserve Quota -->
+          <div class="limit-block">
+            <div class="limit-row">
+              <span class="limit-title" id="reserveTitle">gpt-reserve 98% left</span>
+              <span class="limit-reset" id="reserveReset">Resets in 2d 15h</span>
+            </div>
+            <div class="segmented-bar" id="reserveBar"></div>
+            <div class="limit-subtitle" id="reserveSubtitle">60% in reserve &middot; Lasts until reset &middot; 1.5x headroom</div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- Limit Reset Credits -->
+          <div class="limit-block">
+            <div class="credits-title">Limit Reset Credits</div>
+            <div class="credits-row">
+              <span class="credits-count" id="creditsCount">3 available</span>
+              <span class="credits-expiry" id="creditsExpiry">🕒 9d 34m &middot; 9d 22h &middot; 27d 20h</span>
+            </div>
+          </div>
+
+          <!-- Stats 2x2 Grid -->
+          <div class="stats-grid">
+            <div class="stat-item">
+              <div class="stat-label">Today</div>
+              <div class="stat-value" id="statTodayCost">$0.00</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">30d</div>
+              <div class="stat-value" id="stat30dCost">$1,221.72</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Latest tokens</div>
+              <div class="stat-value" id="statLatestTokens">1.6M</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">30d tokens</div>
+              <div class="stat-value" id="stat30dTokens">1.7B</div>
+            </div>
+          </div>
+
+          <!-- Mini Sparkline Histogram -->
+          <div class="sparkline-container" onclick="showDashboard()" title="Click to view 30-day Spend & Token Dashboard">
+            <div class="sparkline-max" id="sparklineMax">$269</div>
+            <div class="sparkline-bars" id="sparklineBars"></div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="card-footer">
+          <div class="footer-meta-row">
+            <div>
+              <div class="top-model" id="cardTopModel">Top model: gpt-6-astra</div>
+              <div class="disclaimer">Estimated from token usage &middot; not a subscription bill</div>
+            </div>
+            <div class="footer-actions">
+              <button class="icon-btn" title="Refresh" onclick="refreshData()">⟳</button>
+              <button class="icon-btn" title="Quit CodexBar" onclick="quitApp()">✕</button>
+            </div>
+          </div>
+          <button class="switch-view-btn" onclick="showDashboard()">
+            <span>Detailed Spend &amp; Token Dashboard</span>
+            <span>&rsaquo;</span>
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- VIEW 2: SPEND & TOKEN DASHBOARD (Screenshots 1 & 2) -->
+    <div class="view-container">
+      <div class="dashboard-view">
+        
+        <!-- Header -->
+        <div class="dash-header">
+          <button class="back-btn" onclick="showCard()">&lsaquo; Back</button>
+          <div class="toggle-pills">
+            <button class="pill-btn" id="btnPillToken" onclick="setMode('token')">Token</button>
+            <button class="pill-btn active" id="btnPillCost" onclick="setMode('cost')">Cost</button>
+          </div>
+          <div class="footer-actions">
+            <button class="icon-btn" title="Refresh" onclick="refreshData()">⟳</button>
+            <button class="icon-btn" title="Quit CodexBar" onclick="quitApp()">✕</button>
+          </div>
+        </div>
+
+        <!-- 30-day Bar Chart -->
+        <div class="chart-container">
+          <div class="y-axis-labels" id="yAxisLabels">
+            <span id="yAxisTop">$269</span>
+            <span id="yAxisMid">$134</span>
+            <span id="yAxisBot">$0</span>
+          </div>
+          <div class="bars-area" id="dashBarsArea"></div>
+          <div class="chart-x-label" id="chartXLabel">Sep 23</div>
+        </div>
+
+        <!-- Selected Day Breakdown Details -->
+        <div class="day-detail-box" id="dayDetailBox">
+          <div class="day-detail-header" id="dayDetailTitle">Sep 23: $1.36 &middot; 1.6M tokens</div>
+          <div class="day-models-list" id="dayModelsList">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- 30-day Total -->
+        <div class="est-total-box">
+          <div class="est-total-title" id="dashTotalTitle">Est. total (Last 30 days): $1,221.72</div>
+          <div class="est-total-sub">Estimated from token usage &middot; not a subscription bill</div>
+        </div>
+
+        <!-- Projects List -->
+        <div class="projects-section-title">Projects</div>
+        <div class="projects-list" id="dashProjectsList">
+          <!-- Dynamically populated -->
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let globalData = null;
+    let currentMode = 'cost'; // 'cost' or 'token'
+    let selectedDayIndex = -1;
+
+    function showDashboard() {
+      document.getElementById('slider').classList.add('show-dashboard');
+    }
+
+    function showCard() {
+      document.getElementById('slider').classList.remove('show-dashboard');
+    }
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.getElementById('btnPillToken').classList.toggle('active', mode === 'token');
+      document.getElementById('btnPillCost').classList.toggle('active', mode === 'cost');
+      renderDashboard();
+    }
+
+    function renderSegmentedBar(containerId, filledPct) {
+      const el = document.getElementById(containerId);
+      el.innerHTML = '';
+      const totalSegments = 4;
+      const pctPerSegment = 100 / totalSegments;
+
+      for (let i = 0; i < totalSegments; i++) {
+        const seg = document.createElement('div');
+        seg.className = 'segment';
+        const start = i * pctPerSegment;
+        const end = (i + 1) * pctPerSegment;
+
+        if (filledPct >= end) {
+          seg.classList.add('filled');
+        } else if (filledPct > start) {
+          seg.classList.add('partial');
+          const partialPct = ((filledPct - start) / pctPerSegment) * 100;
+          seg.style.setProperty('--partial-pct', `${partialPct}%`);
+        }
+        el.appendChild(seg);
+      }
+    }
+
+    renderSegmentedBar('weeklyBar', 31);
+    renderSegmentedBar('reserveBar', 98);
+
+    let lastUpdateDate = new Date();
+    function updateRelativeTime() {
+      if (!lastUpdateDate) return;
+      const diffSec = Math.floor((new Date() - lastUpdateDate) / 1000);
+      if (diffSec < 60) {
+        document.getElementById('cardUpdateTime').innerText = 'Updated just now';
+      } else if (diffSec < 3600) {
+        const m = Math.floor(diffSec / 60);
+        document.getElementById('cardUpdateTime').innerText = `Updated ${m}m ago`;
+      } else {
+        const h = Math.floor(diffSec / 3600);
+        document.getElementById('cardUpdateTime').innerText = `Updated ${h}h ago`;
+      }
+    }
+    setInterval(updateRelativeTime, 10000);
+
+    function renderCard(data) {
+      // Header
+      if (data.timestamp) {
+        lastUpdateDate = new Date(data.timestamp);
+      } else {
+        lastUpdateDate = new Date();
+      }
+      updateRelativeTime();
+      document.getElementById('cardEmail').innerText = (data.account.email || '') + ' ›';
+      document.getElementById('cardPlan').innerText = data.account.plan || 'Pro 5x';
+
+      // Limits
+      document.getElementById('weeklyTitle').innerText = data.limits.weekly.title;
+      document.getElementById('weeklyReset').innerText = data.limits.weekly.reset_text;
+      document.getElementById('weeklySubtitle').innerText = data.limits.weekly.subtitle;
+      renderSegmentedBar('weeklyBar', data.limits.weekly.left_percent);
+
+      document.getElementById('reserveTitle').innerText = data.limits.reserve.title;
+      document.getElementById('reserveReset').innerText = data.limits.reserve.reset_text;
+      document.getElementById('reserveSubtitle').innerText = data.limits.reserve.subtitle;
+      renderSegmentedBar('reserveBar', data.limits.reserve.left_percent);
+
+      // Credits
+      document.getElementById('creditsCount').innerText = `${data.reset_credits.count} available`;
+      document.getElementById('creditsExpiry').innerText = `🕒 ${data.reset_credits.expiry_text}`;
+
+      // Stats
+      document.getElementById('statTodayCost').innerText = data.highlights.today_cost;
+      document.getElementById('stat30dCost').innerText = data.highlights.total_30d_cost;
+      document.getElementById('statLatestTokens').innerText = data.highlights.latest_tokens;
+      document.getElementById('stat30dTokens').innerText = data.highlights.total_30d_tokens;
+      document.getElementById('cardTopModel').innerText = `Top model: ${data.highlights.top_model}`;
+
+      // Mini Sparkline
+      const sparkline = document.getElementById('sparklineBars');
+      sparkline.innerHTML = '';
+      const daily = data.analytics.daily || [];
+      const maxVal = Math.max(...daily.map(d => d.cost), 1);
+      document.getElementById('sparklineMax').innerText = `$${Math.round(maxVal)}`;
+
+      daily.forEach((d, idx) => {
+        const bar = document.createElement('div');
+        bar.className = 'sparkline-bar';
+        const heightPct = Math.max(4, Math.round((d.cost / maxVal) * 100));
+        bar.style.height = `${heightPct}%`;
+        if (idx === daily.length - 1) bar.classList.add('active');
+        sparkline.appendChild(bar);
+      });
+    }
+
+    // Initial placeholder sparkline
+    const initHeights = [6, 6, 8, 8, 6, 6, 6, 35, 12, 10, 65, 100, 52, 22, 15, 32, 18, 8, 8, 12, 20, 6, 8, 6, 6, 8, 8, 6, 6, 10];
+    const initialSparkline = document.getElementById('sparklineBars');
+    initHeights.forEach((h, idx) => {
+      const bar = document.createElement('div');
+      bar.className = 'sparkline-bar';
+      bar.style.height = `${h}%`;
+      if (idx === initHeights.length - 1) bar.classList.add('active');
+      initialSparkline.appendChild(bar);
+    });
+
+    function renderDashboard() {
+      if (!globalData) return;
+      const daily = globalData.analytics.daily || [];
+      const isCost = currentMode === 'cost';
+
+      // Axis labels
+      const maxVal = isCost 
+        ? Math.max(...daily.map(d => d.cost), 1)
+        : Math.max(...daily.map(d => d.tokens), 1);
+
+      if (isCost) {
+        document.getElementById('yAxisTop').innerText = `$${Math.round(maxVal)}`;
+        document.getElementById('yAxisMid').innerText = `$${Math.round(maxVal / 2)}`;
+        document.getElementById('yAxisBot').innerText = '$0';
+      } else {
+        document.getElementById('yAxisTop').innerText = formatTokens(maxVal);
+        document.getElementById('yAxisMid').innerText = formatTokens(maxVal / 2);
+        document.getElementById('yAxisBot').innerText = '0';
+      }
+
+      // Latest date label
+      if (daily.length > 0) {
+        document.getElementById('chartXLabel').innerText = daily[daily.length - 1].label;
+      }
+
+      // Render Bars
+      const area = document.getElementById('dashBarsArea');
+      area.innerHTML = '';
+
+      if (selectedDayIndex < 0 || selectedDayIndex >= daily.length) {
+        selectedDayIndex = daily.length - 1; // Default to today/latest
+      }
+
+      daily.forEach((d, idx) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'dash-bar-wrap';
+        if (idx === selectedDayIndex) wrap.classList.add('selected');
+
+        const val = isCost ? d.cost : d.tokens;
+        const heightPct = Math.max(3, Math.round((val / maxVal) * 100));
+
+        const bar = document.createElement('div');
+        bar.className = 'dash-bar';
+        bar.style.height = `${heightPct}%`;
+        if (heightPct > 80) bar.classList.add('has-gold-tip');
+
+        wrap.appendChild(bar);
+        wrap.onclick = () => {
+          selectedDayIndex = idx;
+          renderDashboard();
+        };
+
+        area.appendChild(wrap);
+      });
+
+      // Update Selected Day Details
+      const selDay = daily[selectedDayIndex] || daily[daily.length - 1];
+      if (selDay) {
+        document.getElementById('dayDetailTitle').innerText = `${selDay.label}: ${selDay.cost_formatted} · ${selDay.tokens_formatted} tokens`;
+        const list = document.getElementById('dayModelsList');
+        list.innerHTML = '';
+
+        if (selDay.models && selDay.models.length > 0) {
+          selDay.models.forEach(m => {
+            const row = document.createElement('div');
+            row.className = 'day-model-row';
+            row.innerHTML = `
+              <div class="model-color-bar"></div>
+              <div class="model-name">${m.name}</div>
+              <div class="model-val">${m.cost_formatted} · ${m.tokens_formatted}</div>
+            `;
+            list.appendChild(row);
+          });
+        } else {
+          list.innerHTML = `<div style="font-size:12px;color:#94a3b8;padding:2px 0;">No model activity on this day</div>`;
+        }
+      }
+
+      // Estimated total
+      document.getElementById('dashTotalTitle').innerText = `Est. total (Last 30 days): ${globalData.analytics.total_cost_formatted}`;
+
+      // Projects List
+      const projList = document.getElementById('dashProjectsList');
+      projList.innerHTML = '';
+      (globalData.analytics.projects || []).forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'project-item';
+        item.onclick = () => openProjectPath(p.path);
+        item.innerHTML = `
+          <div class="project-row">
+            <span class="project-name">${p.name}</span>
+            <span class="project-stats">${p.cost_formatted} · ${p.tokens_formatted} tokens</span>
+          </div>
+          <div class="project-path" title="${p.path}">${p.path}</div>
+        `;
+        projList.appendChild(item);
+      });
+    }
+
+    function formatTokens(num) {
+      if (num >= 1_000_000_000) return (num / 1_000_000_000).toFixed(1) + 'B';
+      if (num >= 1_000_000) return (num / 1_000_000).toFixed(0) + 'M';
+      if (num >= 1_000) return (num / 1_000).toFixed(0) + 'K';
+      return Math.round(num);
+    }
+
+    function applyData(data) {
+      globalData = data;
+      renderCard(data);
+      renderDashboard();
+    }
+
+    // Native IPC callbacks
+    function refreshData() {
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.refresh) {
+        window.webkit.messageHandlers.refresh.postMessage({});
+      } else {
+        // Fallback for browser preview
+        fetch('/tmp/codexbar_data.json')
+          .then(r => r.json())
+          .then(data => applyData(data))
+          .catch(() => {});
+      }
+    }
+
+    function openProjectPath(path) {
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.openPath) {
+        window.webkit.messageHandlers.openPath.postMessage(path);
+      }
+    }
+
+    function quitApp() {
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.quit) {
+        window.webkit.messageHandlers.quit.postMessage({});
+      }
+    }
+
+    // Polling fallback or initial load
+    window.onload = () => {
+      refreshData();
+    };
+  </script>
+</body>
+</html>
