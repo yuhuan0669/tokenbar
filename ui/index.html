@@ -1067,12 +1067,7 @@
               { key: 'input', label: '未缓存输入 (Fresh Input)', dot: 'dot-input', data: b.input },
               { key: 'output', label: '模型输出 (Output & Reasoning)', dot: 'dot-output', data: b.output },
               { key: 'cache_write', label: '缓存写入 (Cache Write)', dot: 'dot-write', data: b.cache_write }
-            ].filter(it => {
-              if (it.key === 'cache_write' && (!it.data || !it.data.tokens || it.data.tokens <= 0)) {
-                return false;
-              }
-              return true;
-            });
+            ];
 
             let breakdownHTML = '';
             items.forEach(it => {
