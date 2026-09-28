@@ -526,12 +526,32 @@
 
     .day-model-row {
       display: flex;
-      align-items: stretch;
+      flex-direction: column;
+      border-radius: 6px;
+      transition: background 0.15s ease;
+      cursor: pointer;
+      user-select: none;
+      padding: 3px 2px;
+    }
+
+    .day-model-row:hover {
+      background: rgba(0, 0, 0, 0.035);
+    }
+    @media (prefers-color-scheme: dark) {
+      .day-model-row:hover {
+        background: rgba(255, 255, 255, 0.05);
+      }
+    }
+
+    .day-model-header {
+      display: flex;
+      align-items: center;
       line-height: 1.3;
     }
 
     .model-color-bar {
       width: 2.5px;
+      height: 24px;
       background: var(--dash-teal);
       border-radius: 2px;
       margin-right: 8px;
@@ -542,6 +562,7 @@
       display: flex;
       flex-direction: column;
       gap: 2px;
+      flex: 1;
     }
 
     .model-name {
@@ -553,6 +574,79 @@
     .model-val {
       font-size: 12px;
       color: var(--dash-muted);
+    }
+
+    .model-arrow {
+      font-size: 11px;
+      color: var(--dash-muted);
+      margin-left: 6px;
+      padding-right: 4px;
+      transition: transform 0.2s ease;
+    }
+
+    .day-model-row.expanded .model-arrow {
+      transform: rotate(90deg);
+    }
+
+    .model-breakdown {
+      display: none;
+      margin: 4px 2px 2px 10px;
+      padding: 6px 8px;
+      background: rgba(0, 0, 0, 0.025);
+      border-radius: 6px;
+      border-left: 2px solid #029dbb;
+      font-size: 11px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .model-breakdown {
+        background: rgba(255, 255, 255, 0.04);
+        border-left-color: #029dbb;
+      }
+    }
+
+    .day-model-row.expanded .model-breakdown {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .breakdown-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--dash-muted);
+    }
+
+    .breakdown-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .breakdown-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .dot-cached { background: #029dbb; }
+    .dot-input { background: #3b82f6; }
+    .dot-output { background: #8b5cf6; }
+    .dot-write { background: #f59e0b; }
+
+    .breakdown-val {
+      font-weight: 600;
+      color: var(--dash-text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .breakdown-rate {
+      font-size: 10px;
+      font-weight: normal;
+      color: var(--dash-dim);
+      margin-left: 3px;
     }
 
     /* 30-Day Estimated Total */
@@ -773,6 +867,7 @@
     let globalData = null;
     let currentMode = 'cost'; // 'cost' or 'token'
     let selectedDayIndex = -1;
+    const expandedModels = new Set();
 
     function showDashboard() {
       document.getElementById('slider').classList.add('show-dashboard');
@@ -958,14 +1053,69 @@
           selDay.models.forEach(m => {
             const row = document.createElement('div');
             row.className = 'day-model-row';
+            const modelKey = `${selDay.date}_${m.name}`;
+            const isExpanded = expandedModels.has(modelKey);
+            if (isExpanded) row.classList.add('expanded');
+
             const detailText = m.detail || (m.cost > 0 ? `${m.cost_formatted} · ${m.tokens_formatted}` : m.tokens_formatted);
+            const b = m.breakdown || {};
+            const totTokens = m.tokens || 1;
+            const totCost = m.cost || 0.0001;
+
+            const items = [
+              { key: 'cached_input', label: '输入缓存 (Cache Read)', dot: 'dot-cached', data: b.cached_input },
+              { key: 'input', label: '未缓存输入 (Fresh Input)', dot: 'dot-input', data: b.input },
+              { key: 'output', label: '模型输出 (Output & Reasoning)', dot: 'dot-output', data: b.output },
+              { key: 'cache_write', label: '缓存写入 (Cache Write)', dot: 'dot-write', data: b.cache_write }
+            ];
+
+            let breakdownHTML = '';
+            items.forEach(it => {
+              const d = it.data || { tokens: 0, tokens_formatted: '0', cost: 0, cost_formatted: '$0.00', rate_str: '' };
+              if (isCost) {
+                const costPct = totCost > 0 ? ((d.cost / totCost) * 100).toFixed(1) : '0';
+                const rateInfo = d.rate_str ? `<span class="breakdown-rate">(${d.rate_str})</span>` : '';
+                breakdownHTML += `
+                  <div class="breakdown-row">
+                    <span class="breakdown-label"><span class="breakdown-dot ${it.dot}"></span>${it.label}</span>
+                    <span class="breakdown-val">${d.cost_formatted} ${rateInfo}</span>
+                  </div>
+                `;
+              } else {
+                const tokenPct = totTokens > 0 ? ((d.tokens / totTokens) * 100).toFixed(1) : '0';
+                breakdownHTML += `
+                  <div class="breakdown-row">
+                    <span class="breakdown-label"><span class="breakdown-dot ${it.dot}"></span>${it.label}</span>
+                    <span class="breakdown-val">${d.tokens_formatted} <span class="breakdown-rate">(${tokenPct}%)</span></span>
+                  </div>
+                `;
+              }
+            });
+
             row.innerHTML = `
-              <div class="model-color-bar"></div>
-              <div class="model-info">
-                <div class="model-name">${m.name}</div>
-                <div class="model-val">${detailText}</div>
+              <div class="day-model-header">
+                <div class="model-color-bar"></div>
+                <div class="model-info">
+                  <div class="model-name">${m.name}</div>
+                  <div class="model-val">${detailText}</div>
+                </div>
+                <div class="model-arrow">›</div>
+              </div>
+              <div class="model-breakdown">
+                ${breakdownHTML}
               </div>
             `;
+
+            row.onclick = () => {
+              if (expandedModels.has(modelKey)) {
+                expandedModels.delete(modelKey);
+                row.classList.remove('expanded');
+              } else {
+                expandedModels.add(modelKey);
+                row.classList.add('expanded');
+              }
+            };
+
             list.appendChild(row);
           });
         } else {

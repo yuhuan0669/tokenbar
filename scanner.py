@@ -347,18 +347,29 @@ def get_model_pricing(norm_model):
     # 3. Builtin fallback
     return CODEX_PRICING.get(norm_model) or CODEX_PRICING["gpt-5.6-sol"]
 
-def calculate_codex_cost(model, input_tokens, output_tokens, cached_input_tokens=0, cache_write_tokens=0):
+def calculate_codex_cost_detailed(model, input_tokens, output_tokens, cached_input_tokens=0, cache_write_tokens=0):
     norm = normalize_model(model)
     pricing = get_model_pricing(norm)
-    if pricing.get("unpriced"):
-        return 0.0
 
-    # Codex/OpenAI reports input_tokens as total prompt size, with cached reads as a SUBSET of it.
     total_input = max(0, input_tokens)
     cached = min(max(0, cached_input_tokens), total_input)
     remaining_after_cache = total_input - cached
     cache_write = min(max(0, cache_write_tokens), remaining_after_cache)
     non_cached = remaining_after_cache - cache_write
+    out = max(0, output_tokens)
+
+    if pricing.get("unpriced"):
+        return 0.0, {
+            "input_tokens": non_cached,
+            "cached_input_tokens": cached,
+            "cache_write_tokens": cache_write,
+            "output_tokens": out,
+            "input_cost": 0.0,
+            "cached_input_cost": 0.0,
+            "cache_write_cost": 0.0,
+            "output_cost": 0.0,
+            "rates": {}
+        }
 
     threshold = pricing.get("threshold")
     uses_long_context = (threshold is not None and total_input > threshold)
@@ -368,12 +379,31 @@ def calculate_codex_cost(model, input_tokens, output_tokens, cached_input_tokens
     cache_read_rate = pricing.get("cache_read_above" if uses_long_context else "cache_read", pricing.get("cache_read", input_rate))
     cache_write_rate = pricing.get("cache_write_above" if uses_long_context else "cache_write", pricing.get("cache_write", input_rate))
 
-    cost = (
-        non_cached * input_rate +
-        cached * cache_read_rate +
-        cache_write * cache_write_rate +
-        max(0, output_tokens) * output_rate
-    )
+    cost_inp = non_cached * input_rate
+    cost_cached = cached * cache_read_rate
+    cost_cw = cache_write * cache_write_rate
+    cost_out = out * output_rate
+    total_cost = cost_inp + cost_cached + cost_cw + cost_out
+
+    return total_cost, {
+        "input_tokens": non_cached,
+        "cached_input_tokens": cached,
+        "cache_write_tokens": cache_write,
+        "output_tokens": out,
+        "input_cost": cost_inp,
+        "cached_input_cost": cost_cached,
+        "cache_write_cost": cost_cw,
+        "output_cost": cost_out,
+        "rates": {
+            "input_rate": input_rate * 1e6,
+            "cache_read_rate": cache_read_rate * 1e6,
+            "cache_write_rate": cache_write_rate * 1e6,
+            "output_rate": output_rate * 1e6,
+        }
+    }
+
+def calculate_codex_cost(model, input_tokens, output_tokens, cached_input_tokens=0, cache_write_tokens=0):
+    cost, _ = calculate_codex_cost_detailed(model, input_tokens, output_tokens, cached_input_tokens, cache_write_tokens)
     return cost
 
 def format_tokens(num):
@@ -676,7 +706,7 @@ def scan_sessions():
 
             raw_model = ev["model"]
             disp_model = model_display_name(raw_model)
-            cost = calculate_codex_cost(
+            cost, b_info = calculate_codex_cost_detailed(
                 raw_model,
                 ev["inp"],
                 ev["out"],
@@ -693,9 +723,31 @@ def scan_sessions():
 
             day_models = daily_records[day_key]["models"]
             if disp_model not in day_models:
-                day_models[disp_model] = {"tokens": 0, "cost": 0.0}
+                day_models[disp_model] = {
+                    "tokens": 0,
+                    "cost": 0.0,
+                    "input_tokens": 0,
+                    "cached_input_tokens": 0,
+                    "cache_write_tokens": 0,
+                    "output_tokens": 0,
+                    "input_cost": 0.0,
+                    "cached_input_cost": 0.0,
+                    "cache_write_cost": 0.0,
+                    "output_cost": 0.0,
+                    "rates": b_info.get("rates", {})
+                }
             day_models[disp_model]["tokens"] += tot
             day_models[disp_model]["cost"] += cost
+            day_models[disp_model]["input_tokens"] += b_info["input_tokens"]
+            day_models[disp_model]["cached_input_tokens"] += b_info["cached_input_tokens"]
+            day_models[disp_model]["cache_write_tokens"] += b_info["cache_write_tokens"]
+            day_models[disp_model]["output_tokens"] += b_info["output_tokens"]
+            day_models[disp_model]["input_cost"] += b_info["input_cost"]
+            day_models[disp_model]["cached_input_cost"] += b_info["cached_input_cost"]
+            day_models[disp_model]["cache_write_cost"] += b_info["cache_write_cost"]
+            day_models[disp_model]["output_cost"] += b_info["output_cost"]
+            if b_info.get("rates"):
+                day_models[disp_model]["rates"] = b_info["rates"]
 
             total_tokens_30d += tot
             total_cost_30d += cost
@@ -721,13 +773,48 @@ def scan_sessions():
         sorted_models = sorted(rec["models"].items(), key=lambda x: (-x[1]["cost"], -x[1]["tokens"], x[0]))
         for m_name, m_data in sorted_models:
             detail_str = format_model_cost_detail(m_name, m_data["cost"], m_data["tokens"])
+            rates = m_data.get("rates", {})
             models_formatted.append({
                 "name": m_name,
                 "cost": m_data["cost"],
                 "cost_formatted": format_currency(m_data["cost"]),
                 "tokens": m_data["tokens"],
                 "tokens_formatted": format_tokens(m_data["tokens"]),
-                "detail": detail_str
+                "detail": detail_str,
+                "breakdown": {
+                    "cached_input": {
+                        "name": "输入缓存 (Cache Read)",
+                        "tokens": m_data.get("cached_input_tokens", 0),
+                        "tokens_formatted": format_tokens(m_data.get("cached_input_tokens", 0)),
+                        "cost": m_data.get("cached_input_cost", 0.0),
+                        "cost_formatted": format_currency(m_data.get("cached_input_cost", 0.0)),
+                        "rate_str": f"${rates.get('cache_read_rate', 0):.2f}/M" if "cache_read_rate" in rates else ""
+                    },
+                    "input": {
+                        "name": "未缓存输入 (Fresh Input)",
+                        "tokens": m_data.get("input_tokens", 0),
+                        "tokens_formatted": format_tokens(m_data.get("input_tokens", 0)),
+                        "cost": m_data.get("input_cost", 0.0),
+                        "cost_formatted": format_currency(m_data.get("input_cost", 0.0)),
+                        "rate_str": f"${rates.get('input_rate', 0):.2f}/M" if "input_rate" in rates else ""
+                    },
+                    "output": {
+                        "name": "模型输出 (Output & Reasoning)",
+                        "tokens": m_data.get("output_tokens", 0),
+                        "tokens_formatted": format_tokens(m_data.get("output_tokens", 0)),
+                        "cost": m_data.get("output_cost", 0.0),
+                        "cost_formatted": format_currency(m_data.get("output_cost", 0.0)),
+                        "rate_str": f"${rates.get('output_rate', 0):.2f}/M" if "output_rate" in rates else ""
+                    },
+                    "cache_write": {
+                        "name": "缓存写入 (Cache Write)",
+                        "tokens": m_data.get("cache_write_tokens", 0),
+                        "tokens_formatted": format_tokens(m_data.get("cache_write_tokens", 0)),
+                        "cost": m_data.get("cache_write_cost", 0.0),
+                        "cost_formatted": format_currency(m_data.get("cache_write_cost", 0.0)),
+                        "rate_str": f"${rates.get('cache_write_rate', 0):.2f}/M" if "cache_write_rate" in rates else ""
+                    }
+                }
             })
 
         daily_list.append({
