@@ -551,7 +551,8 @@
 
     .model-color-bar {
       width: 2.5px;
-      height: 24px;
+      align-self: stretch;
+      min-height: 24px;
       background: var(--dash-teal);
       border-radius: 2px;
       margin-right: 8px;
@@ -561,7 +562,7 @@
     .model-info {
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: 1.5px;
       flex: 1;
     }
 
@@ -574,6 +575,13 @@
     .model-val {
       font-size: 12px;
       color: var(--dash-muted);
+    }
+
+    .model-mode-val {
+      font-size: 11px;
+      color: #94a3b8;
+      letter-spacing: -0.1px;
+      margin-top: 0.5px;
     }
 
     .model-arrow {
@@ -1045,7 +1053,9 @@
       // Update Selected Day Details
       const selDay = daily[selectedDayIndex] || daily[daily.length - 1];
       if (selDay) {
-        document.getElementById('dayDetailTitle').innerText = `${selDay.label}: ${selDay.cost_formatted} · ${selDay.tokens_formatted} tokens`;
+        document.getElementById('dayDetailTitle').innerText = isCost
+          ? `${selDay.label}: ${selDay.cost_formatted} · ${selDay.tokens_formatted} tokens`
+          : `${selDay.label}: ${selDay.tokens_formatted} tokens`;
         const list = document.getElementById('dayModelsList');
         list.innerHTML = '';
 
@@ -1057,7 +1067,11 @@
             const isExpanded = expandedModels.has(modelKey);
             if (isExpanded) row.classList.add('expanded');
 
-            const detailText = m.detail || (m.cost > 0 ? `${m.cost_formatted} · ${m.tokens_formatted}` : m.tokens_formatted);
+            const detailText = isCost
+              ? (m.detail || (m.cost > 0 ? `${m.cost_formatted} · ${m.tokens_formatted}` : m.tokens_formatted))
+              : m.tokens_formatted;
+            const modeSubtitle = isCost ? m.mode_subtitle_cost : m.mode_subtitle_token;
+            const modeSubtitleHTML = modeSubtitle ? `<div class="model-mode-val">${modeSubtitle}</div>` : '';
             const b = m.breakdown || {};
             const totTokens = m.tokens || 1;
             const totCost = m.cost || 0.0001;
@@ -1098,6 +1112,7 @@
                 <div class="model-info">
                   <div class="model-name">${m.name}</div>
                   <div class="model-val">${detailText}</div>
+                  ${modeSubtitleHTML}
                 </div>
                 <div class="model-arrow">›</div>
               </div>

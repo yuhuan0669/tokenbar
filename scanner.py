@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 DATA_FILE = os.path.expanduser("~/.codex/codexbar_data.json")
 CACHE_FILE = os.path.expanduser("~/.codex/codexbar_session_cache.json")
 AUTH_FILE = os.path.expanduser("~/.codex/auth.json")
+LOGS_DB_FILE = os.path.expanduser("~/.codex/logs_2.sqlite")
+PRIORITY_CACHE_FILE = os.path.expanduser("~/.codex/codexbar_priority_cache.json")
 
 # CodexBar exact pricing table from CostUsagePricing.swift
 # All rates are per token (USD). Threshold: 272,000 input tokens.
@@ -347,6 +349,96 @@ def get_model_pricing(norm_model):
     # 3. Builtin fallback
     return CODEX_PRICING.get(norm_model) or CODEX_PRICING["gpt-5.6-sol"]
 
+def get_fast_multiplier(model):
+    norm = normalize_model(model)
+    if norm in ("gpt-5.4", "gpt-5.4-mini", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra"):
+        return 2.0
+    if norm == "gpt-5.5":
+        return 2.5
+    return 1.0
+
+def load_priority_turn_ids():
+    """
+    Incremental scanner for priority turns from ~/.codex/logs_2.sqlite.
+    Caches max rowid and known priority turn IDs in ~/.codex/codexbar_priority_cache.json.
+    """
+    if not os.path.exists(LOGS_DB_FILE):
+        return set()
+
+    cache_data = {"last_row_id": 0, "priority_turn_ids": []}
+    if os.path.exists(PRIORITY_CACHE_FILE):
+        try:
+            with open(PRIORITY_CACHE_FILE, "r") as f:
+                cache_data = json.load(f)
+        except Exception:
+            cache_data = {"last_row_id": 0, "priority_turn_ids": []}
+
+    last_row_id = cache_data.get("last_row_id", 0)
+    priority_turns = set(cache_data.get("priority_turn_ids", []))
+
+    try:
+        import sqlite3
+        import re
+        conn = sqlite3.connect(LOGS_DB_FILE, timeout=1.0)
+        cur = conn.cursor()
+
+        if last_row_id > 0:
+            query = """
+                select rowid, feedback_log_body
+                from logs
+                where rowid > ?
+                  and (feedback_log_body like '%service_tier: Some(Some("priority"))%'
+                       or feedback_log_body like '%service_tier":"priority%'
+                       or feedback_log_body like '%"service_tier": "priority"%')
+                order by rowid
+            """
+            cur.execute(query, (last_row_id,))
+        else:
+            thirty_days_ago = int(time.time()) - 30 * 86400
+            query = """
+                select rowid, feedback_log_body
+                from logs indexed by idx_logs_ts
+                where ts >= ?
+                  and (feedback_log_body like '%service_tier: Some(Some("priority"))%'
+                       or feedback_log_body like '%service_tier":"priority%'
+                       or feedback_log_body like '%"service_tier": "priority"%')
+                order by rowid
+            """
+            cur.execute(query, (thirty_days_ago,))
+
+        rows = cur.fetchall()
+        max_row = last_row_id
+        for r in rows:
+            row_id = r[0]
+            if row_id > max_row:
+                max_row = row_id
+            body = r[1]
+            m = (re.search(r'turn\.id=([^\s,\]\)\}:]+)', body) or
+                 re.search(r'turn_id=([^\s,\]\)\}:]+)', body) or
+                 re.search(r'id:\s*\"([^\"]+)\"', body) or
+                 re.search(r'\"turn_id\":\s*\"([^\"]+)\"', body))
+            if m:
+                priority_turns.add(m.group(1))
+
+        # Advance max_row if needed
+        cur.execute("select max(rowid) from logs")
+        max_res = cur.fetchone()
+        if max_res and max_res[0] and max_res[0] > max_row:
+            max_row = max_res[0]
+
+        conn.close()
+
+        try:
+            with open(PRIORITY_CACHE_FILE, "w") as f:
+                json.dump({"last_row_id": max_row, "priority_turn_ids": list(priority_turns)}, f)
+        except Exception:
+            pass
+
+    except Exception as e:
+        print(f"Notice: Failed to query logs_2.sqlite for priority turns: {e}", file=sys.stderr)
+
+    return priority_turns
+
 def calculate_codex_cost_detailed(model, input_tokens, output_tokens, cached_input_tokens=0, cache_write_tokens=0):
     norm = normalize_model(model)
     pricing = get_model_pricing(norm)
@@ -564,8 +656,26 @@ def resolve_project_root(cwd):
     name = os.path.basename(p) or p
     return name, p
 
+DATE_CACHE = {}
+
+def parse_day_key(ts):
+    if not ts:
+        return datetime.now().strftime("%Y-%m-%d")
+    prefix = ts[:13]
+    if prefix in DATE_CACHE:
+        return DATE_CACHE[prefix]
+    dt_str = ts.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(dt_str)
+        res = dt.astimezone().strftime("%Y-%m-%d")
+    except Exception:
+        res = ts[:10]
+    DATE_CACHE[prefix] = res
+    return res
+
 def scan_sessions():
     init_pricing()
+    priority_turns = load_priority_turn_ids()
     now = datetime.now()
     thirty_days_ago = now - timedelta(days=30)
     
@@ -589,20 +699,34 @@ def scan_sessions():
             if datetime.fromtimestamp(mtime) < thirty_days_ago:
                 continue
 
-            cache_key = f"{path}:{mtime}"
-            if cache_key in cache:
-                parsed = cache[cache_key]
-                file_results[path] = parsed
-                updated_cache[cache_key] = parsed
+            file_size = os.path.getsize(path)
+            cached_data = cache.get(path)
+            if cached_data and cached_data.get("size") == file_size:
+                file_results[path] = cached_data
+                updated_cache[path] = cached_data
                 continue
 
-            cwd = "unknown"
-            events = []
-            turn_models = {}
-            current_model = None
-            thread_model = None
+            cwd = cached_data.get("cwd", "unknown") if cached_data else "unknown"
+            events = list(cached_data.get("events", [])) if cached_data else []
+            start_offset = cached_data.get("size", 0) if (cached_data and file_size >= cached_data.get("size", 0)) else 0
+
+            if start_offset == 0:
+                events = []
+                turn_models = {}
+                current_model = None
+                thread_model = None
+                current_tier = "default"
+                thread_tier = "default"
+            else:
+                turn_models = dict(cached_data.get("turn_models", {}))
+                current_model = cached_data.get("current_model")
+                thread_model = cached_data.get("thread_model")
+                current_tier = cached_data.get("current_tier", "default")
+                thread_tier = cached_data.get("thread_tier", "default")
 
             with open(path, "r", errors="ignore") as f:
+                if start_offset > 0:
+                    f.seek(start_offset)
                 for line in f:
                     if not line.strip():
                         continue
@@ -640,6 +764,10 @@ def scan_sessions():
                         if m:
                             thread_model = m
                             current_model = m
+                        st = ts_info.get("service_tier")
+                        if st:
+                            thread_tier = st
+                            current_tier = st
                     elif t == "token_usage_record" or "usage" in payload:
                         usage = payload.get("usage") or payload.get("token_usage")
                         if usage and isinstance(usage, dict):
@@ -659,12 +787,23 @@ def scan_sessions():
                                 "cached_write": cached_write,
                                 "tot": tot,
                                 "model": model,
-                                "ts": ts
+                                "ts": ts,
+                                "turn_id": turn_id,
+                                "tier": current_tier
                             })
 
-            parsed = {"cwd": cwd, "events": events}
+            parsed = {
+                "size": file_size,
+                "cwd": cwd,
+                "events": events,
+                "turn_models": turn_models,
+                "current_model": current_model,
+                "thread_model": thread_model,
+                "current_tier": current_tier,
+                "thread_tier": thread_tier
+            }
             file_results[path] = parsed
-            updated_cache[cache_key] = parsed
+            updated_cache[path] = parsed
         except Exception:
             pass
 
@@ -677,7 +816,7 @@ def scan_sessions():
 
     # Build aggregates
     projects = {}
-    daily_records = {} # day_key -> {tokens, cost, models: {name: {tokens, cost}}}
+    daily_records = {} # day_key -> {tokens, cost, models: {name: {tokens, cost, ...}}}
     total_tokens_30d = 0
     total_cost_30d = 0.0
 
@@ -693,19 +832,28 @@ def scan_sessions():
             projects[proj_name] = {"name": proj_name, "path": proj_path, "tokens": 0, "cost": 0.0}
 
         for ev in data.get("events", []):
-            ts = ev["ts"]
-            dt_str = ts.replace("Z", "+00:00")
-            try:
-                dt = datetime.fromisoformat(dt_str)
-                day_key = dt.astimezone().strftime("%Y-%m-%d")
-            except Exception:
-                day_key = ts[:10]
+            day_key = parse_day_key(ev.get("ts", ""))
 
             if day_key not in daily_records:
                 continue
 
             raw_model = ev["model"]
             disp_model = model_display_name(raw_model)
+            norm = normalize_model(raw_model)
+
+            turn_id = ev.get("turn_id")
+            tier = ev.get("tier", "default")
+            is_fast = (turn_id in priority_turns) if turn_id else False
+            if not is_fast and tier == "priority":
+                is_fast = True
+
+            multiplier = 1.0
+            if is_fast:
+                fast_mult = get_fast_multiplier(norm)
+                if fast_mult != 1.0:
+                    if ev["inp"] <= 272_000 or norm == "gpt-6-astra":
+                        multiplier = fast_mult
+
             cost, b_info = calculate_codex_cost_detailed(
                 raw_model,
                 ev["inp"],
@@ -713,6 +861,13 @@ def scan_sessions():
                 ev.get("cached", 0),
                 ev.get("cached_write", 0)
             )
+
+            if multiplier != 1.0:
+                cost *= multiplier
+                b_info["input_cost"] *= multiplier
+                b_info["cached_input_cost"] *= multiplier
+                b_info["cache_write_cost"] *= multiplier
+                b_info["output_cost"] *= multiplier
 
             tot = ev["tot"]
             projects[proj_name]["tokens"] += tot
@@ -726,6 +881,10 @@ def scan_sessions():
                 day_models[disp_model] = {
                     "tokens": 0,
                     "cost": 0.0,
+                    "std_tokens": 0,
+                    "std_cost": 0.0,
+                    "fast_tokens": 0,
+                    "fast_cost": 0.0,
                     "input_tokens": 0,
                     "cached_input_tokens": 0,
                     "cache_write_tokens": 0,
@@ -738,6 +897,13 @@ def scan_sessions():
                 }
             day_models[disp_model]["tokens"] += tot
             day_models[disp_model]["cost"] += cost
+            if is_fast:
+                day_models[disp_model]["fast_tokens"] += tot
+                day_models[disp_model]["fast_cost"] += cost
+            else:
+                day_models[disp_model]["std_tokens"] += tot
+                day_models[disp_model]["std_cost"] += cost
+
             day_models[disp_model]["input_tokens"] += b_info["input_tokens"]
             day_models[disp_model]["cached_input_tokens"] += b_info["cached_input_tokens"]
             day_models[disp_model]["cache_write_tokens"] += b_info["cache_write_tokens"]
@@ -774,6 +940,32 @@ def scan_sessions():
         for m_name, m_data in sorted_models:
             detail_str = format_model_cost_detail(m_name, m_data["cost"], m_data["tokens"])
             rates = m_data.get("rates", {})
+
+            # Fast vs Std mode subtitle matching CodexBar CostHistoryChartMenuView.swift
+            has_mode_split = (m_data.get("fast_tokens", 0) > 0) or (m_data.get("fast_cost", 0.0) > 0)
+            mode_subtitle_cost = None
+            mode_subtitle_token = None
+
+            if has_mode_split:
+                cost_parts = []
+                token_parts = []
+                std_c = m_data.get("std_cost", 0.0)
+                std_t = m_data.get("std_tokens", 0)
+                fast_c = m_data.get("fast_cost", 0.0)
+                fast_t = m_data.get("fast_tokens", 0)
+
+                if std_c > 0 or std_t > 0:
+                    cost_parts.append(f"Std {format_currency(std_c)} · {format_tokens(std_t)}")
+                    token_parts.append(f"Std {format_tokens(std_t)}")
+                if fast_c > 0 or fast_t > 0:
+                    cost_parts.append(f"Fast {format_currency(fast_c)} · {format_tokens(fast_t)}")
+                    token_parts.append(f"Fast {format_tokens(fast_t)}")
+
+                if cost_parts:
+                    mode_subtitle_cost = " / ".join(cost_parts)
+                if token_parts:
+                    mode_subtitle_token = " / ".join(token_parts)
+
             models_formatted.append({
                 "name": m_name,
                 "cost": m_data["cost"],
@@ -781,6 +973,13 @@ def scan_sessions():
                 "tokens": m_data["tokens"],
                 "tokens_formatted": format_tokens(m_data["tokens"]),
                 "detail": detail_str,
+                "has_mode_split": has_mode_split,
+                "mode_subtitle_cost": mode_subtitle_cost,
+                "mode_subtitle_token": mode_subtitle_token,
+                "std_cost": m_data.get("std_cost", 0.0),
+                "std_tokens": m_data.get("std_tokens", 0),
+                "fast_cost": m_data.get("fast_cost", 0.0),
+                "fast_tokens": m_data.get("fast_tokens", 0),
                 "breakdown": {
                     "cached_input": {
                         "name": "输入缓存 (Cache Read)",
