@@ -114,11 +114,13 @@ class TokenBarAppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandl
     }
 
     private func startPeriodicRefresh() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 60.0, repeats: true) { [weak self] _ in
             DispatchQueue.global(qos: .utility).async {
                 self?.executeScanner()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        refreshTimer = timer
     }
 
     func executeScanner() {
@@ -130,19 +132,15 @@ class TokenBarAppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandl
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = [scannerPath]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
             process.waitUntilExit()
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let jsonString = String(data: data, encoding: .utf8), !jsonString.isEmpty {
-                DispatchQueue.main.async { [weak self] in
-                    self?.applyJSONData(jsonString)
-                }
+            DispatchQueue.main.async { [weak self] in
+                self?.loadCachedData()
             }
         } catch {
             print("Failed to run scanner: \(error)")

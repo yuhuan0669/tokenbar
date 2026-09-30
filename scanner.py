@@ -1166,5 +1166,4 @@ def build_full_payload():
     return payload
 
 if __name__ == "__main__":
-    data = build_full_payload()
-    print(json.dumps(data, indent=2))
+    build_full_payload()
